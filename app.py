@@ -1,131 +1,144 @@
 import streamlit as st
 import pandas as pd
+from datetime import date
 
-# CONFIGURAZIONE PAGINA
-st.set_page_config(page_title="Hotel Booking System", layout="wide")
+# PAGE CONFIGURATION
+st.set_page_config(page_title="Hotel AI Quote Generator", layout="wide")
 
-# LINK CSV PUBBLICO
+# PUBLIC CSV LINK
 URL_FOGLIO = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT2cZ1oYAvs5JmpKNvuBIFj-RgXRCBnyfrujMM6Wej5lphqpTGU27Yd2gmH9XeBhzl3bjEo_OHLW0OW/pub?gid=0&single=true&output=csv"
 
 @st.cache_data(ttl=60)
-def carica_listino(url):
+def load_pricing_data(url):
     try:
         df = pd.read_csv(url, header=None)
         return df
     except Exception as e:
-        st.error(f"Errore di connessione al foglio: {e}")
+        st.error(f"Connection error: {e}")
         return None
 
-df_raw = carica_listino(URL_FOGLIO)
+def get_season(checkin_date):
+    """Determines the season based on the check-in date."""
+    month = checkin_date.month
+    day = checkin_date.day
+    
+    # TOP SEASON: Dec 21 - Jan 06
+    if (month == 12 and day >= 21) or (month == 1 and day <= 6):
+        return "Top"
+    # LOW SEASON: May 01 - July 31
+    elif 5 <= month <= 7:
+        return "Low"
+    # MEDIUM SEASON: Everything else
+    else:
+        return "Mid"
 
-st.title("🏨 Preventivatore Professional con Opzione Agency")
+df_raw = load_pricing_data(URL_FOGLIO)
+
+st.title("🏨 Automated Hotel Quote System")
+
+# --- SECURITY ---
+# Ho inserito la password che hai richiesto
+password = st.sidebar.text_input("Access Password", type="password")
+if password != "Rafiki15":
+    st.warning("Please enter the correct password to access the system.")
+    st.stop()
 
 if df_raw is not None:
-    # --- SIDEBAR: PARAMETRI DI INPUT ---
-    st.sidebar.header("Dati Soggiorno")
+    # --- SIDEBAR: STAY DETAILS ---
+    st.sidebar.header("Stay Details")
     
-    valuta = st.sidebar.selectbox("Valuta", ["EURO", "DOLLAR"])
-    is_agency = st.sidebar.toggle("È un'Agenzia?", value=False)
+    currency = st.sidebar.selectbox("Currency", ["EURO", "DOLLAR"])
+    is_agency = st.sidebar.toggle("Agency Rate?", value=False)
     
-    # --- LOGICA SELEZIONE LISTINO ---
-    # Definiamo i prezzi in base a Valuta + Agency (dati presi dal tuo screenshot)
-    if valuta == "EURO":
-        simbolo = "€"
+    # DATE SELECTION
+    today = date.today()
+    col_in, col_out = st.sidebar.columns(2)
+    with col_in:
+        checkin = st.date_input("Check-in date", today)
+    with col_out:
+        checkout = st.date_input("Check-out date", today.replace(day=today.day+1) if today.day < 28 else today)
+    
+    n_nights = (checkout - checkin).days
+    if n_nights <= 0:
+        st.sidebar.error("Check-out must be after check-in.")
+        st.stop()
+    
+    # AUTO SEASON DETECTION
+    season = get_season(checkin)
+    st.sidebar.info(f"Detected Season: **{season}**")
+
+    # --- PRICING LOGIC ---
+    if currency == "EURO":
+        symbol = "€"
         if is_agency:
-            # INTERNATIONAL AGENCY EURO
-            prezzi = {
-                "Standard room": [160, 185, 380],
-                "Superior": [175, 200, 380],
-                "Junior Suite": [210, 230, 420],
-                "Suite": [260, 285, 480]
-            }
+            prices = {"Standard room": [160, 185, 380], "Superior": [175, 200, 380], "Junior Suite": [210, 230, 420], "Suite": [260, 285, 480]}
             sup_hb, sup_fb = 25, 50
         else:
-            # INTERNATIONAL EURO (Direct)
-            prezzi = {
-                "Standard room": [215, 250, 480],
-                "Superior": [230, 265, 480],
-                "Junior Suite": [275, 310, 520],
-                "Suite": [345, 380, 600]
-            }
+            prices = {"Standard room": [215, 250, 480], "Superior": [230, 265, 480], "Junior Suite": [275, 310, 520], "Suite": [345, 380, 600]}
             sup_hb, sup_fb = 35, 70
     else:
-        simbolo = "$"
+        symbol = "$"
         if is_agency:
-            # INTERNATIONAL AGENCY DOLLAR (Rif. blocco 185-215-440)
-            prezzi = {
-                "Standard room": [185, 215, 440],
-                "Superior": [200, 230, 440],
-                "Junior Suite": [240, 270, 480],
-                "Suite": [300, 330, 560]
-            }
+            prices = {"Standard room": [185, 215, 440], "Superior": [200, 230, 440], "Junior Suite": [240, 270, 480], "Suite": [300, 330, 560]}
             sup_hb, sup_fb = 30, 60
         else:
-            # INTERNATIONAL DOLLAR (Rif. blocco 250-290-550)
-            prezzi = {
-                "Standard room": [250, 290, 550],
-                "Superior": [270, 310, 550],
-                "Junior Suite": [320, 360, 600],
-                "Suite": [400, 440, 700]
-            }
+            prices = {"Standard room": [250, 290, 550], "Superior": [270, 310, 550], "Junior Suite": [320, 360, 600], "Suite": [400, 440, 700]}
             sup_hb, sup_fb = 40, 80
 
-    # --- SELEZIONE INPUT ---
-    tipo_camera = st.sidebar.selectbox("Tipologia Camera", list(prezzi.keys()))
-    n_camere = st.sidebar.number_input("Numero di Camere", min_value=1, value=1, step=1)
-    stagione = st.sidebar.select_slider("Stagionalità", options=["Low", "Mid", "Top"])
-    n_notti = st.sidebar.number_input("Numero di Notti", min_value=1, value=1)
-    n_persone_tot = st.sidebar.number_input("Numero Persone Totali", min_value=1, value=2)
-    trattamento = st.sidebar.radio("Trattamento", ["BB", "HB", "FB"])
+    # --- OTHER INPUTS ---
+    room_type = st.sidebar.selectbox("Room Category", list(prices.keys()))
+    n_rooms = st.sidebar.number_input("Number of Rooms", min_value=1, value=1)
+    n_pax_total = st.sidebar.number_input("Total Number of People", min_value=1, value=2)
+    meal_plan = st.sidebar.radio("Meal Plan", ["BB", "HB", "FB"])
 
-    # --- LOGICA DI CALCOLO ---
-    col_idx = 0 if stagione == "Low" else (1 if stagione == "Mid" else 2)
-    prezzo_camera_notte = prezzi[tipo_camera][col_idx]
+    # --- CALCULATION ---
+    col_idx = 0 if season == "Low" else (1 if season == "Mid" else 2)
+    base_room_price = prices[room_type][col_idx]
 
-    supplemento_persona = 0
-    if stagione == "Top":
-        if trattamento == "FB":
-            supplemento_persona = sup_fb - sup_hb
-        else:
-            supplemento_persona = 0
+    meal_supplement = 0
+    if season == "Top":
+        if meal_plan == "FB": meal_supplement = sup_fb - sup_hb
+        else: meal_supplement = 0
     else:
-        if trattamento == "HB":
-            supplemento_persona = sup_hb
-        elif trattamento == "FB":
-            supplemento_persona = sup_fb
+        if meal_plan == "HB": meal_supplement = sup_hb
+        elif meal_plan == "FB": meal_supplement = sup_fb
 
-    totale_camere = (prezzo_camera_notte * n_camere)
-    totale_pasti = (supplemento_persona * n_persone_tot)
-    totale_soggiorno = (totale_camere + totale_pasti) * n_notti
+    total_rooms = (base_room_price * n_rooms)
+    total_meals = (meal_supplement * n_pax_total)
+    grand_total = (total_rooms + total_meals) * n_nights
 
-    # --- VISUALIZZAZIONE ---
+    # --- DISPLAY ---
     st.divider()
     c1, c2 = st.columns(2)
     
     with c1:
-        tipo_cliente = "AGENZIA" if is_agency else "DIRETTO"
-        st.subheader(f"📊 Preventivo {tipo_cliente}")
-        st.write(f"**Listino:** {valuta} - {tipo_cliente}")
-        st.write(f"**Camera:** {n_camere}x {tipo_camera} ({stagione})")
-        
-        st.metric("Totale Lordo", f"{simbolo} {totale_soggiorno:,.2f}")
+        st.subheader("📊 Quote Summary")
+        st.write(f"**Stay:** {checkin} to {checkout} ({n_nights} nights)")
+        st.write(f"**Season:** {season} Season")
+        st.metric("Total Base Price", f"{symbol} {grand_total:,.2f}")
 
     with c2:
-        st.subheader("🤖 Generazione Offerta")
-        valore_sconto = st.number_input("Sconto (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
-        prezzo_finale = totale_soggiorno * (1 - valore_sconto/100)
+        st.subheader("🤖 Final Quotation")
+        discount = st.number_input("Special Discount (%)", 0.0, 100.0, 0.0, 0.5)
+        final_price = grand_total * (1 - discount/100)
         
-        testo_offerta = f"""Gentile {'Partner' if is_agency else 'Ospite'},
-abbiamo il piacere di inviarvi la quotazione richiesta:
+        # Etichetta dinamica basata su Agency o Direct
+        label_prezzo = "Net Agency Rate" if is_agency else "Total Amount"
+        
+        final_text = f"""Dear {'Partner' if is_agency else 'Guest'},
 
-🏨 Sistemazione: {n_camere} {tipo_camera}
-🌙 Durata: {n_notti} notti
-🍽 Trattamento: {trattamento}
-👥 Occupazione: {n_persone_tot} persone
+We are pleased to offer you the following quotation for your upcoming stay:
 
-Prezzo totale: {simbolo} {prezzo_finale:,.2f}
-{'Netto Agenzia' if is_agency else 'Prezzo Finale'}
+🏨 Accommodation: {n_rooms} {room_type}
+📅 Period: from {checkin} to {checkout} ({n_nights} nights)
+🍽 Meal Plan: {meal_plan}
+👥 Occupancy: {n_pax_total} person(s)
 
-Restiamo a disposizione per la conferma."""
+✅ {label_prezzo}: {symbol} {final_price:,.2f}
 
-        st.text_area("Testo da copiare:", testo_offerta, height=250)
+(Standard list rate: {symbol}{grand_total:,.2f})
+
+We look forward to hearing from you. 
+Best regards."""
+
+        st.text_area("Copy and send via Email/WhatsApp:", final_text, height=300)
